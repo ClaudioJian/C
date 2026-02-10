@@ -16,10 +16,6 @@ typedef enum{
 }error_code;
 
 jmp_buf has_error;
-
-double layer2(char **ptr);
-double layer1(char **ptr);
-
 typedef struct{
 	double mantissa;
 	int exponent;
@@ -30,6 +26,10 @@ typedef struct{
 	full divisor;
 }num;
 
+num layer2(char **ptr);
+//num layer1(char **ptr); skip for now
+
+//check overflow and underflow for multiplication
 int has_inf(double value, double next_val){
 	if(next_val==0) return 0;
 	
@@ -41,6 +41,7 @@ int has_inf(double value, double next_val){
 	return 0;
 }
 
+//string to number
 double get_number(char **ptr){
     double number = 0;
     unsigned int div_i = 0;
@@ -50,22 +51,25 @@ double get_number(char **ptr){
     
     while(**ptr==' '){(*ptr)++;}
     
+	//check sign and operator '!'(handle situation like --5 or !!5)
 	while(**ptr=='-'||**ptr=='+'||**ptr=='!') {
 		if(**ptr=='-') sig*= -1;
 		if(**ptr=='!') has_not = (!has_not);
 		(*ptr)++;
-		}
+	}
 	
-	while(**ptr>='0' && **ptr<='9'||**ptr=='.'){	
+	//number part
+	while(**ptr>='0' && **ptr<='9'||**ptr=='.'){
 		if(**ptr!='.'){
 			if(has_dot) div_i++;
-			if(div_i>308 && number!= 0) longjmp(has_error,is_overflow);}
-			has_inf(number,10)
+			//10^308 is already overflow for double
+			if(div_i>308 && number!= 0) longjmp(has_error,is_overflow);
+			has_inf(number,10);
 
 			number = number * 10 +(**ptr-'0');
 		}
-		else {
-			if(has_dot) longjmp(has_error,ex_dot);
+		else{
+			if(has_dot) longjmp(has_error,ex_dot); //detect extra dot
 			else has_dot = 1;
 		}
 		(*ptr)++;
@@ -83,6 +87,9 @@ double get_number(char **ptr){
 }
 
 double pow_base10(int exp){
+	if (exp > 308) longjmp(has_error, is_overflow);
+    if (exp < -324) longjmp(has_error, is_underflow); 
+
 	double result = 1.0;
 	double base = 10.0;
 	int has_neg= 0;
@@ -97,16 +104,14 @@ double pow_base10(int exp){
 			result *= base;
 		}
 		exp/=2;
-		if(exp>0){
-			if(!has_inf(base,base)) base *= base;
-		}
+		if(exp>0)base *= base;
 	}
 	if(has_neg) result = 1.0/result;
 	return result;
 }
 
+//normalize number into scientific notation(1.mantissa * 10^exponent)
 void normalize(full *val){
-	
 	//handle negative number
 	int sig= 1;
 	if (val->mantissa<0) {sig=-1;val->mantissa *= -1;}
@@ -124,8 +129,11 @@ void normalize(full *val){
 			val->exponent--;
 	}
 	val->mantissa *= sig;
+	return;
+	}
 }
 
+//handle parentheses
 num layer0(char **ptr){
 	num number;
 	if(**ptr=='('){
@@ -133,6 +141,7 @@ num layer0(char **ptr){
 		number = layer4(ptr);
 		if(**ptr==')')(*ptr)++;
 	}else{
+		//set dividend(scientific notation)/1
 		number.divisor.mantissa = 1;
 		number.divisor.exponent = 0;
 		number.value.mantissa = get_number(ptr);
@@ -142,27 +151,28 @@ num layer0(char **ptr){
 	return number;
 }
 
-//skip for now
-double layer1(char **ptr){  //factorial
-	unsigned int i=0;
-    double value = get_number(ptr);
-	
-	while(**ptr=='!'||**ptr==' '){
-		if(**ptr=='!') i++;
-		(*ptr)++;
-	}
-	if(i>=1){
-		if(value==0) return 1;
-		if(value<0) longjmp(has_error,neg_factorial);
-		if(value>=170&& i==1) longjmp(has_error , is_overflow);
-			
-		for(double multiplier = value - i;multiplier > 0;multiplier-=i){
-		value *= multiplier;
-		}
-	}
-	return value;
-}
 
+// double layer1(char **ptr){  //factorial
+// 	unsigned int i=0;
+//     double value = get_number(ptr);
+	
+// 	while(**ptr=='!'||**ptr==' '){
+// 		if(**ptr=='!') i++;
+// 		(*ptr)++;
+// 	}
+// 	if(i>=1){
+// 		if(value==0) return 1;
+// 		if(value<0) longjmp(has_error,neg_factorial);
+// 		if(value>=170&& i==1) longjmp(has_error , is_overflow);
+			
+// 		for(double multiplier = value - i;multiplier > 0;multiplier-=i){
+// 		value *= multiplier;
+// 		}
+// 	}
+// 	return value;
+// }
+
+//modify only val directly in memory
 void multiply(full *val, full* next_val){
 	(val->mantissa)*=(next_val->mantissa);
 	(val->exponent)+=(next_val->exponent);
@@ -177,39 +187,45 @@ void division(full *val, full* next_val){
 	return;
 }
 
+//modify only val directly in memory
 void add(full *val, full* next_val){
-	if(val->mantissa==0.0){
+	if(val->mantissa==0.0){ 
 		val->mantissa = next_val->mantissa;
 		val->exponent = next_val->exponent;
 		return;
 	}
-	if(next_val->mantissa==0.0) return;
+	if(next_val->mantissa==0.0) return; //no change for val
 	
 	int exp_diff = val->exponent - next_val->exponent;
 	
+	//double can only handle 15~17 decimal digits precisely
 	if(exp_diff == 0) val->mantissa += next_val->mantissa;
-	else if(exp_diff>0 && exp_diff<16){ //val>next_val
-		val->mantissa += next_val->mantissa/pow10n[exp];
-	}
-	else if(exp_diff<0){
-		if(exp_diff>-16){
-			val->mantissa /= pow10n[-exp_diff];
-			val->exponent = next_val->exponent;
-			val->mantissa += next_val ->mantissa;
+	else {
+		if(exp_diff>0 && exp_diff<16){ //val>next_val
+			val->mantissa += next_val->mantissa/pow10n[exp_diff];
 		}
-		else{
-			val->mantissa = next_val->mantissa;
-			val->exponent = next_val->exponent;
+		else if(exp_diff<0){ //next_val>val
+			if(exp_diff>-16){
+				val->mantissa /= pow10n[-exp_diff]; //align with next_val
+				val->mantissa += next_val ->mantissa;
+				val->exponent = next_val->exponent;
 			}
+			else{
+				//when exp_diff is smaller than -16, the contribution of val is negligible, so just assign next_val to val
+				val->mantissa = next_val->mantissa;
+				val->exponent = next_val->exponent;
+			}
+		}
 	}
 	normalize(val);
 	return;
 }
 
 void longlong_cast(full *val){
+	//long long 0.n = 0
 	if(val->exponent <0){
 		val->mantissa = 0.0;
-		val->exponent =0;
+		val->exponent = 0;
 	}else if(val->exponent<18){
 		long long casted_val = val->mantissa * pow_base10(val->exponent);
 		val->mantissa = casted_val;
@@ -257,16 +273,17 @@ num layer2(char **ptr){
 			multiply(&number.value, &next_val.value);
 			multiply(&number.divisor, &next_val.divisor);
 		}
-		if(number.value.mantissa == number.divisor.mantissa)){
+		if(number.value.mantissa == number.divisor.mantissa){
 			number.divisor.mantissa = number.value.mantissa = 1.0;
     }
 	
 	number.value.exponent -= number.divisor.exponent;
 	
 	return number;
+	}
 }
 
-number layer3(char **ptr){
+num layer3(char **ptr){
     num number = layer2(ptr);
 	
     while(**ptr=='+'||**ptr=='-') {
@@ -277,15 +294,17 @@ number layer3(char **ptr){
 		if(next_val.value.mantissa == 0) continue;
 		if(number.value.mantissa == 0){
 			if(op =='-'){
+			//negate next_val for function add
 			next_val.value.mantissa *= -1;
 			next_val.divisor.mantissa *= -1;
 			}
 			number.value = next_val.value;
 			number.divisor = next_val.divisor;
-			}
 		}
 
+		//skip this line when divisors are same
 		if((number.divisor.mantissa != next_val.divisor.mantissa)||(number.divisor.exponent != next_val.divisor.exponent)){
+			//cross multiply
 			multiply(&number.value,&next_val.divisor);
 			multiply(&next_val.value,&number.divisor);
 			multiply(&number.divisor,&next_val.divisor);
@@ -294,12 +313,12 @@ number layer3(char **ptr){
 		add(&number.value,&next_val.value);
 		
 		//easy simplification: trigger if dividend and divisor are same
-		if(number.value.mantissa == number.divisor.mantissa)){
+		if(number.value.mantissa == number.divisor.mantissa){
 			number.divisor.mantissa = number.value.mantissa = 1.0;
 		}
-    }
-	number.value.exponent -= number.divisor.exponent;
-    return number;
+		number.value.exponent -= number.divisor.exponent;
+	}
+	return number;
 }
 
 num layer4(char **ptr){
@@ -310,18 +329,19 @@ num layer4(char **ptr){
 		char op_adjacent = **ptr;
 		if(**ptr == '=')  (*ptr)++;
 		
-		number next_val = layer3(ptr);
+		num next_val = layer3(ptr);
+		//   [x/y > a/b] -> [xb/1 > ya/1] -> [xb > ya]
 		multiply(&number.value,&next_val.divisor);
 		multiply(&next_val.value,&number.divisor);
 		number.divisor.mantissa = 1.0;
 		number.divisor.exponent = 0.0;
 		
-		int is_equal =(number.value.mantissa==next_val.value.mantissa)&&(number.value.exponent==next_val.value.exponent);
+		int is_equal = (number.value.mantissa == next_val.value.mantissa)&&(number.value.exponent == next_val.value.exponent);
         if(op_adjacent == '='){
 			if(op=='!') {
 				number.value.mantissa = !is_equal;
 				number.value.exponent = 0.0;
-			continue;}
+				continue;}
 			if(is_equal){
 				number.value.mantissa = is_equal;
 				number.value.exponent = 0.0;
@@ -329,13 +349,14 @@ num layer4(char **ptr){
 			}
 		}
 		
+		//compare magnitudes when exponents are different; compare mantissas when exponents are same or signal between numbers <0.
 		int signal = number.value.mantissa * next_val.value.mantissa;
 		int boolean;
 		if (signal < 0 || number.value.exponent == next_val.value.exponent) {
 			boolean = (number.value.mantissa > next_val.value.mantissa);
 		} else {
 			boolean = (number.value.exponent > next_val.value.exponent);
-		if (number.value.mantissa < 0) boolean = !boolean; // Flip for negative magnitudes
+			if (number.value.mantissa < 0) boolean = !boolean; // Flip for negative magnitudes
 		}
 		
 		if(op == '<')  boolean = !boolean;
@@ -343,10 +364,10 @@ num layer4(char **ptr){
 		number.value.exponent = 0.0;
 		
 		//easy simplification: trigger if dividend and divisor are same
-		if(number.value.mantissa == number.divisor.mantissa)){
+		if(number.value.mantissa == number.divisor.mantissa){
 			number.divisor.mantissa = number.value.mantissa = 1.0;
 		}
-    }
+	}
 	
     return number;
 }
@@ -361,7 +382,7 @@ int main()
 			char *ptr = string;
 			char *str_head = ptr;
 			
-			result = layer3(&ptr);
+			//result = layer4(&ptr); //skip problem for now
 			
 			//error check
 			int error_val = setjmp(has_error);
@@ -395,10 +416,10 @@ int main()
 		
 		char answer[40];
 		printf("\ndo you want to restart(enter \"q\" to quit program)?");
-		scanf("%i",&answer);
+		scanf("%39s",&answer);
 		int i =0;
 		while (answer[i] == ' ' || answer[i] == '\t') i++;
-		if(answer[i]=='q'||answer[i]=='q') break;
+		if(answer[i]=='q'||answer[i]=='Q') break;
 	}
 	
     return 0;
