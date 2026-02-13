@@ -1,137 +1,11 @@
+#include <windows.h>
 #include <stdio.h>
-#include <setjmp.h>
 
-#define max_double_limit 1.7976931348623157e308
-#define min_double_limit 2.2250738585072014e-308
-#define max_double_int 9007199254740992
+//custom header files
+#include "CustomErrorcheck.h"
+#include "CustomMath.h"
 
-double pow10n[16]={1.0,1e1,1e2,1e3,1e4,1e5,1e7,1e8,1e9,1e10,1e11,1e12,1e13,1e14,1e15,1e16};
-
-typedef enum{
-	div_zero = 1,
-	is_overflow,
-	is_underflow,
-	ex_dot,
-	neg_factorial
-}error_code;
-
-jmp_buf has_error;
-typedef struct{
-	double mantissa;
-	int exponent;
-}full;
-
-typedef struct{
-	full value;
-	full divisor;
-}num;
-
-num layer2(char **ptr);
-//num layer1(char **ptr); skip for now
-
-//check overflow and underflow for multiplication
-int has_inf(double value, double next_val){
-	if(next_val==0) return 0;
-	
-	if (value < 1.0 && next_val < 1.0) {
-		if(value < min_double_limit/next_val) longjmp(has_error,is_underflow);
-	}
-	else if(value > max_double_limit/next_val) longjmp(has_error,is_overflow);
-	
-	return 0;
-}
-
-//string to number
-double get_number(char **ptr){
-    double number = 0;
-    unsigned int div_i = 0;
-    unsigned char has_dot = 0;
-	double sig= 1;
-	int has_not = 0;
-    
-    while(**ptr==' '){(*ptr)++;}
-    
-	//check sign and operator '!'(handle situation like --5 or !!5)
-	while(**ptr=='-'||**ptr=='+'||**ptr=='!') {
-		if(**ptr=='-') sig*= -1;
-		if(**ptr=='!') has_not = (!has_not);
-		(*ptr)++;
-	}
-	
-	//number part
-	while(**ptr>='0' && **ptr<='9'||**ptr=='.'){
-		if(**ptr!='.'){
-			if(has_dot) div_i++;
-			//10^308 is already overflow for double
-			if(div_i>308 && number!= 0) longjmp(has_error,is_overflow);
-			has_inf(number,10);
-
-			number = number * 10 +(**ptr-'0');
-		}
-		else{
-			if(has_dot) longjmp(has_error,ex_dot); //detect extra dot
-			else has_dot = 1;
-		}
-		(*ptr)++;
-	}
-		
-	// precision check
-	if(number>= max_double_int) printf("warning: loss precision\n");
-	
-	if(has_dot && number!= 0) number /= pow_base10(div_i);
-	if(has_not) number = (!number);
-		
-    while(**ptr==' '){(*ptr)++;}
-	
-    return number*sig;
-}
-
-double pow_base10(int exp){
-	if (exp > 308) longjmp(has_error, is_overflow);
-    if (exp < -324) longjmp(has_error, is_underflow); 
-
-	double result = 1.0;
-	double base = 10.0;
-	int has_neg= 0;
-	if(exp<0) {
-		exp = -exp;
-		has_neg = 1;
-	}
-	
-	while(exp>0){
-		if(exp%2==1) {
-			has_inf(result,10);
-			result *= base;
-		}
-		exp/=2;
-		if(exp>0)base *= base;
-	}
-	if(has_neg) result = 1.0/result;
-	return result;
-}
-
-//normalize number into scientific notation(1.mantissa * 10^exponent)
-void normalize(full *val){
-	//handle negative number
-	int sig= 1;
-	if (val->mantissa<0) {sig=-1;val->mantissa *= -1;}
-		
-	if(val->mantissa >= 1){
-		while(val->mantissa >=10){
-			val->mantissa/=10;
-			val->exponent++;
-		}
-	}
-	//handle small number
-	else{
-		while(val->mantissa < 1 && val->mantissa != 0){
-			val->mantissa*=10;
-			val->exponent--;
-	}
-	val->mantissa *= sig;
-	return;
-	}
-}
+num layer4(char **);
 
 //handle parentheses
 num layer0(char **ptr){
@@ -144,13 +18,12 @@ num layer0(char **ptr){
 		//set dividend(scientific notation)/1
 		number.divisor.mantissa = 1;
 		number.divisor.exponent = 0;
-		number.value.mantissa = get_number(ptr);
+		number.value.mantissa = get_num(ptr);
 		number.value.exponent = 0;
 		normalize(&number.value);
 	}
 	return number;
 }
-
 
 // double layer1(char **ptr){  //factorial
 // 	unsigned int i=0;
@@ -171,69 +44,6 @@ num layer0(char **ptr){
 // 	}
 // 	return value;
 // }
-
-//modify only val directly in memory
-void multiply(full *val, full* next_val){
-	(val->mantissa)*=(next_val->mantissa);
-	(val->exponent)+=(next_val->exponent);
-	normalize(val);
-	return;
-}
-
-void division(full *val, full* next_val){
-	(val->mantissa)/=(next_val->mantissa);
-	(val->exponent)-=(next_val->exponent);
-	normalize(val);
-	return;
-}
-
-//modify only val directly in memory
-void add(full *val, full* next_val){
-	if(val->mantissa==0.0){ 
-		val->mantissa = next_val->mantissa;
-		val->exponent = next_val->exponent;
-		return;
-	}
-	if(next_val->mantissa==0.0) return; //no change for val
-	
-	int exp_diff = val->exponent - next_val->exponent;
-	
-	//double can only handle 15~17 decimal digits precisely
-	if(exp_diff == 0) val->mantissa += next_val->mantissa;
-	else {
-		if(exp_diff>0 && exp_diff<16){ //val>next_val
-			val->mantissa += next_val->mantissa/pow10n[exp_diff];
-		}
-		else if(exp_diff<0){ //next_val>val
-			if(exp_diff>-16){
-				val->mantissa /= pow10n[-exp_diff]; //align with next_val
-				val->mantissa += next_val ->mantissa;
-				val->exponent = next_val->exponent;
-			}
-			else{
-				//when exp_diff is smaller than -16, the contribution of val is negligible, so just assign next_val to val
-				val->mantissa = next_val->mantissa;
-				val->exponent = next_val->exponent;
-			}
-		}
-	}
-	normalize(val);
-	return;
-}
-
-void longlong_cast(full *val){
-	//long long 0.n = 0
-	if(val->exponent <0){
-		val->mantissa = 0.0;
-		val->exponent = 0;
-	}else if(val->exponent<18){
-		long long casted_val = val->mantissa * pow_base10(val->exponent);
-		val->mantissa = casted_val;
-		val->exponent = 0;
-		normalize(val);
-	}
-	return;
-}
 
 num layer2(char **ptr){ 
 	num number = layer0(ptr);
@@ -374,6 +184,7 @@ num layer4(char **ptr){
 
 int main()
 {
+	SetDllDirectoryA("lib");
 	while(1){
 		char string[1024];
 		double result;
@@ -421,6 +232,6 @@ int main()
 		while (answer[i] == ' ' || answer[i] == '\t') i++;
 		if(answer[i]=='q'||answer[i]=='Q') break;
 	}
-	
+
     return 0;
 }
