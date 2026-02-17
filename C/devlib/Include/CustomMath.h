@@ -1,3 +1,8 @@
+//to use this dll, the arguments should be passed by reference, and the return value is always void(changes directly value). 
+//Mostly of result and arguments are in the struct full* passed by reference.
+//full* is a struct that contains a double mantissa and an int exponent [scientific notation (mantissa * 10^exponent)]
+
+
 #ifndef CUSTOMMATH_H
 #define CUSTOMMATH_H
 

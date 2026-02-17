@@ -63,7 +63,7 @@ double get_num(char **ptr){
 	}
 	
 	//number part
-	while(**ptr>='0' && **ptr<='9'||**ptr=='.'){
+	while((**ptr>='0' && **ptr<='9')||(**ptr=='.')){
 		if(**ptr!='.'){
 			if(has_dot) div_i++;
 			//10^308 is already overflow for double
