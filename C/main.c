@@ -49,8 +49,8 @@ int main(){
 		
 		char answer[40];
 		printf("\ndo you want to restart(enter \"q\" to quit program)?");
-		scanf("%39s",&answer);
-		int i =0;
+		scanf("%39s",answer);
+		int i = 0;
 		while (answer[i] == ' ' || answer[i] == '\t') i++;
 		if(answer[i]=='q'||answer[i]=='Q') break;
 	}

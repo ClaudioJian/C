@@ -1,3 +1,8 @@
+ifeq($(filter debug,$(MAKECMDGOALS)),debug)
+	Q = @
+else
+	Q =
+
 INCDIRS=./devlib/include
 #all possible source directories for the .c files
 SRCDIRS=. ./devlib ./devlib/Src
@@ -26,6 +31,8 @@ WARNINGFLAGS=-Wall -Wextra
 CFLAGS=$(foreach dir,$(INCDIRS),-I$(dir)) $(WARNINGFLAGS) -L./devlib
 HCHECK=-MD -MP -MF devlib/Dfiles/$(basename $(@F)).d
 
+Q = @ # for silent command execution
+
 
 DLLSETTINGS=-shared -Wl,--out-implib=devlib/lib
 
@@ -50,16 +57,19 @@ DEPLIBS =$(foreach dll,$(DEP_$(basename $(@F))),-l$(dll))
 # --- RULES ---
 all : $(EXECUTABLES)
 
+debug : all
+	@echo "Debug mode: showing all commands during compilation"
+
 # buiding the launcher
 $(word 1,$(EXECUTABLES)) : launcher.c
 	@echo Compiling $@ with dependencies
-	gcc $(WARNINGFLAGS) $(HCHECK) -o $@ $<
+	$(Q)gcc $(WARNINGFLAGS) $(HCHECK) -o $@ $<
 
 # building the logic for calculator
 $(word 2,$(EXECUTABLES)) : main.c $(ALL_DLLS)
 	@echo Compiling $@ with dependencies...
 	@echo "Dependencies: $(DEP_$(basename $(@F)))"
-	gcc $(CFLAGS) $(HCHECK) $< -o $@ $(DEPLIBS)
+	$(Q)gcc $(CFLAGS) $(HCHECK) $< -o $@ $(DEPLIBS)
 
 #general DLL building template
 #gets all folder in TARGETDIRS and put corresponding .dll to user/indicated folder/...
@@ -71,7 +81,7 @@ endef
 define DLL_TEMPLATE
 user/$(1)/%.dll : $(FOLDERSRC)/Src$(1)/%.c $$(call getDLLS_fromNAME,DEP_$$(basename $$(not dir %.dll)))
 	@echo buiding dll: $$(@F)
-	gcc $$< $(DLLSETTINGS)$$(*F).lib $$(HCHECK) $(CFLAGS) $$(DEPLIBS) -o $$@ 
+	$(Q)gcc $$< $(DLLSETTINGS)$$(*F).lib $$(HCHECK) $(CFLAGS) $$(DEPLIBS) -o $$@ 
 endef
 
 $(foreach subfolder,$(TARGETDIRS),$(eval $(call DLL_TEMPLATE,$(subfolder))))

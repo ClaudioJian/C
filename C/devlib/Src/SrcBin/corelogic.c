@@ -91,8 +91,8 @@ num layer2(char **ptr){
 	
 	number.value.exponent -= number.divisor.exponent;
 	
-	return number;
 	}
+	return number;
 }
 
 num layer3(char **ptr){
